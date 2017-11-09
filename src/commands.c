@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-
+#include <unistd.h>
+#include <wait.h>
 #include "commands.h"
 #include "built_in.h"
 
@@ -30,8 +31,12 @@ static int is_built_in_command(const char* command_name)
  */
 int evaluate_command(int n_commands, struct single_command (*commands)[512])
 {
-  if (n_commands > 0) {
-    struct single_command* com = (*commands);
+				int status;
+				int ki=0; //commands index
+				int pid=0; //process ID
+				struct single_command* com;
+  while(n_commands > 0) {
+    com = (*commands+ki);
 
     assert(com->argc != 0);
 
@@ -50,9 +55,20 @@ int evaluate_command(int n_commands, struct single_command (*commands)[512])
     } else if (strcmp(com->argv[0], "exit") == 0) {
       return 1;
     } else {
-      fprintf(stderr, "%s: command not found\n", com->argv[0]);
-      return -1;
+			pid=fork();
+			if(pid==0)
+			{
+				execv(com->argv[0],com->argv);			
+      	fprintf(stderr, "%s: command not found\n", com->argv[0]);
+      	return -1;
+			}
+			else if(pid>0)
+			{
+				wait(&status);
+				printf("Process Creation Success!\n");
+			}
     }
+		n_commands--;
   }
 
   return 0;
