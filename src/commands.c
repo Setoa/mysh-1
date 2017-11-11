@@ -6,6 +6,141 @@
 #include <wait.h>
 #include "commands.h"
 #include "built_in.h"
+#include <errno.h>
+#include <sys/type.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#define SOCK_PATH "tpf_unix_sock.server"
+#define SERVER_PATH "tpf_unix_sock.server"
+#define CLIENT_PATH "tpf_unix_sock.client"
+#define DATA "Hello from server"
+
+void server()
+{
+	int server_sock,client_sock,len,rc;
+	int bytes_rec=0;
+	struct sockaddr_un server_sockaddr;
+	struct sockaddr_un client_sockaddr;
+	char buf[256];
+	int backlog=10;
+	memset(&server_sockaddr,0,sizeof(struct sockaddr_un));
+	memset(&client_sockaddr,0,sizeof(struct sockaddr_un));
+	memset(buf,0,256);
+	server_sock=socket(AF_UNIX,SOCK_STREAM,0);
+	if(sesrver_sock==-1)
+	{
+		printf("SOCKET ERROR : %d\n",sock_errno());
+		exit(1);
+	}
+	server_sockaddr.sun_family=AF_UNIX;
+	strcpy(server_sockaddr.sun_path,SOCK_PATH);
+	len=sizeof(server_sockaddr);
+	unlink(SOCK_PATH);
+	rc=bind(server_sock,(struct sockaddr*)&server_sockaddr,len);
+	if(rc==-1)
+	{
+		printf("BIND ERROR : %d\n",sock_errno());
+		close(server_sock);
+		exit(1);
+	}
+	rc=listen(server_sock,backlog);
+	if(rc==-1)
+	{
+		printf("LISTEN ERROR : %d\n",sock_errno());
+		close(server_sock);
+		exit(1);
+	}
+	printf("socket listening...\n");
+	client_sock=accept(server_sock,(struct sockaddr*)&client_sockaddr,&len);
+	if(client_sock==-1)
+	{
+		printf("ACCEPT ERROR : %d\n",sock_errno());
+		close(server_sock);
+		close(client_sock);
+		exit(1);
+	}
+	len=sizeof(client_sockaddr);
+	rc=getpeername(client_sock,(struct sockaddr*)&client_sockaddr,&len);
+	if(rc==-1)
+	{
+		printf("GETPEERNAME ERROR : %d\n",sock_errno());
+		close(server_sock);
+		close(client_sock);
+		exit(1);
+	}
+	else printf("DATA RECEIVED = %s\n",buf);
+	memset(buf,0,256);
+	strcpy(buf,DATA);
+	printf("Sending data...\n");
+	rc=send(client_sock,buf,strlen(buf),0);
+	if(rc==-1)
+	{
+		printf("SEND ERROR : %d\n",sock_errno());
+		close(server_sock);
+		close(client_sock);
+		exit(1);
+	}
+	else printf("Data sent!\n");
+	close(server_sock);
+	close(client_sock);
+}
+
+void client()
+{
+	int clinet_sock,rc,len;
+	struct sockaddr_un server_sockaddr;
+	struct sockaddr_un client_sockaddr;
+	char buf[256];
+	memset(&server_sockaddr,0,sizeof(struct sockaddr_un));
+	memset(&client_sockaddr,0,sizeof(struct sockaddr_un));
+	client_sock=socket(AF_UNIX,SOCK_STREAM,0);
+	if(client_sock==-1)
+	{
+		printf("SOCKET ERROR : %d\n",sock_errno());
+		exit(1);
+	}
+	client_sockaddr.sun_family=AF_UNIX;
+	strcpy(client_sockaddr.sun_path,CLIENT_PATH);
+	len=sizeof(client_sockaddr);
+	unlink(CLIENT_PATH);
+	rc=bind(client_sock,(struct sockaddr*)&client_sockaddr,len);
+	if(rc==-1)
+	{
+		printf("BIND ERROR : %d\n",sock_errno());
+		close(client_sock);
+		exit(1);
+	}
+	server_sockaddr.sun_family=AF_UNIX;
+	strcpy(server_sockaddr.sun_path,SERVER_PATH);
+	rc=connect(client_sock,(struct sockaddr*)&server_sockaddr,len);
+	if(rc==-1)
+	{
+		printf("CONNECT ERROR : %d\n",sock_errno());
+		close(client_sock);
+		exit(1);
+	}
+	strcpy(buf,DATA);
+	printf("Sending data...\n");
+	rc=send(client_sock,buf,strlen(buf),0);
+	if(rc==-1)
+	{
+		printf("SEND ERROR : %d\n",sock_errno());
+		close(client_sock);
+		exit(1);
+	}
+	else printf("Data sent!\n");
+	printf("Waiting to receive data...\n");
+	memset(buf,0,sizeof(buf));
+	rc=recv(client_sock,buf,sizeof(buf));
+	if(rc==-1)
+	{
+		printf("RECV ERROR : %d\n",sock_errno());
+		close(client_sock);
+		exit(1);
+	}
+	else printf("DATA RECEIVED = %s\n",buf);
+	close(client_sock);
+}
 
 static struct built_in_command built_in_commands[] = {
   { "cd", do_cd, validate_cd_argv },
@@ -26,18 +161,28 @@ static int is_built_in_command(const char* command_name)
   return -1; // Not found
 }
 
+char** make_back_argv(int argc, char** argv)
+{
+	char** back_argv=(char**)malloc(sizeof(char*)*(argc-1));
+	for(int i=0; i<argc-1; i++)
+	{
+		back_argv[i]=(char*)malloc(sizeof(char));
+		strcpy(back_argv[i],argv[i]);
+	}
+	return back_argv;
+}
+
 /*
  * Description: Currently this function only handles single built_in commands. You should modify this structure to launch process and offer pipeline functionality.
  */
 int evaluate_command(int n_commands, struct single_command (*commands)[512])
 {
-				int status;
-				int ki=0; //commands index
-				int pid=0; //process ID
-				struct single_command* com;
-  while(n_commands > 0) {
+	int status;
+	int pid=0; //process ID
+	struct single_command* com;
+  if(n_commands == 1) {
     com = (*commands+ki);
-
+		char** back_argv=make_back_argv(com->argc,com->argv);
     assert(com->argc != 0);
 
     int built_in_pos = is_built_in_command(com->argv[0]);
@@ -58,19 +203,39 @@ int evaluate_command(int n_commands, struct single_command (*commands)[512])
 			pid=fork();
 			if(pid==0)
 			{
-				execv(com->argv[0],com->argv);			
+				if(strcmp(com->argv[com->argc-1],"&")==0) execv(com->argv[0],back_argv);
+				else execv(com->argv[0],com->argv);			
       	fprintf(stderr, "%s: command not found\n", com->argv[0]);
       	return -1;
 			}
 			else if(pid>0)
 			{
-				wait(&status);
-				printf("Process Creation Success!\n");
+				if(strcmp(com->argv[com->argc-1],"&")==0) printf("%d\n",pid);
+				else
+				{
+					wait(&status);
+					printf("Process Creation Success!\n");
+				}
 			}
     }
-		n_commands--;
+		
   }
-
+	else if(n_commands==2)
+	{
+		int spid=fork();
+		if(spid==0)
+		{
+			client();
+		}
+		else if(spid>0)
+		{
+			server();
+		}
+		else
+		{
+			printf("FORK ERROR\n");
+		}
+	}
   return 0;
 }
 
