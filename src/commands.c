@@ -7,9 +7,10 @@
 #include "commands.h"
 #include "built_in.h"
 #include <errno.h>
-#include <sys/type.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <pthread.h>
 #define SOCK_PATH "tpf_unix_sock.server"
 #define SERVER_PATH "tpf_unix_sock.server"
 #define CLIENT_PATH "tpf_unix_sock.client"
@@ -27,9 +28,9 @@ void server()
 	memset(&client_sockaddr,0,sizeof(struct sockaddr_un));
 	memset(buf,0,256);
 	server_sock=socket(AF_UNIX,SOCK_STREAM,0);
-	if(sesrver_sock==-1)
+	if(server_sock==-1)
 	{
-		printf("SOCKET ERROR : %d\n",sock_errno());
+		printf("SOCKET ERROR : %d\n",1);
 		exit(1);
 	}
 	server_sockaddr.sun_family=AF_UNIX;
@@ -39,14 +40,14 @@ void server()
 	rc=bind(server_sock,(struct sockaddr*)&server_sockaddr,len);
 	if(rc==-1)
 	{
-		printf("BIND ERROR : %d\n",sock_errno());
+		printf("BIND ERROR : %d\n",2);
 		close(server_sock);
 		exit(1);
 	}
 	rc=listen(server_sock,backlog);
 	if(rc==-1)
 	{
-		printf("LISTEN ERROR : %d\n",sock_errno());
+		printf("LISTEN ERROR : %d\n",3);
 		close(server_sock);
 		exit(1);
 	}
@@ -54,7 +55,7 @@ void server()
 	client_sock=accept(server_sock,(struct sockaddr*)&client_sockaddr,&len);
 	if(client_sock==-1)
 	{
-		printf("ACCEPT ERROR : %d\n",sock_errno());
+		printf("ACCEPT ERROR : %d\n",4);
 		close(server_sock);
 		close(client_sock);
 		exit(1);
@@ -63,7 +64,7 @@ void server()
 	rc=getpeername(client_sock,(struct sockaddr*)&client_sockaddr,&len);
 	if(rc==-1)
 	{
-		printf("GETPEERNAME ERROR : %d\n",sock_errno());
+		printf("GETPEERNAME ERROR : %d\n",5);
 		close(server_sock);
 		close(client_sock);
 		exit(1);
@@ -75,7 +76,7 @@ void server()
 	rc=send(client_sock,buf,strlen(buf),0);
 	if(rc==-1)
 	{
-		printf("SEND ERROR : %d\n",sock_errno());
+		printf("SEND ERROR : %d\n",6);
 		close(server_sock);
 		close(client_sock);
 		exit(1);
@@ -87,7 +88,7 @@ void server()
 
 void client()
 {
-	int clinet_sock,rc,len;
+	int client_sock,rc,len;
 	struct sockaddr_un server_sockaddr;
 	struct sockaddr_un client_sockaddr;
 	char buf[256];
@@ -96,7 +97,7 @@ void client()
 	client_sock=socket(AF_UNIX,SOCK_STREAM,0);
 	if(client_sock==-1)
 	{
-		printf("SOCKET ERROR : %d\n",sock_errno());
+		printf("SOCKET ERROR : %d\n",11);
 		exit(1);
 	}
 	client_sockaddr.sun_family=AF_UNIX;
@@ -106,7 +107,7 @@ void client()
 	rc=bind(client_sock,(struct sockaddr*)&client_sockaddr,len);
 	if(rc==-1)
 	{
-		printf("BIND ERROR : %d\n",sock_errno());
+		printf("BIND ERROR : %d\n",12);
 		close(client_sock);
 		exit(1);
 	}
@@ -115,7 +116,7 @@ void client()
 	rc=connect(client_sock,(struct sockaddr*)&server_sockaddr,len);
 	if(rc==-1)
 	{
-		printf("CONNECT ERROR : %d\n",sock_errno());
+		printf("CONNECT ERROR : %d\n",13);
 		close(client_sock);
 		exit(1);
 	}
@@ -124,17 +125,17 @@ void client()
 	rc=send(client_sock,buf,strlen(buf),0);
 	if(rc==-1)
 	{
-		printf("SEND ERROR : %d\n",sock_errno());
+		printf("SEND ERROR : %d\n",14);
 		close(client_sock);
 		exit(1);
 	}
 	else printf("Data sent!\n");
 	printf("Waiting to receive data...\n");
 	memset(buf,0,sizeof(buf));
-	rc=recv(client_sock,buf,sizeof(buf));
+	rc=recv(client_sock,buf,sizeof(buf),0);
 	if(rc==-1)
 	{
-		printf("RECV ERROR : %d\n",sock_errno());
+		printf("RECV ERROR : %d\n",15);
 		close(client_sock);
 		exit(1);
 	}
@@ -172,16 +173,48 @@ char** make_back_argv(int argc, char** argv)
 	return back_argv;
 }
 
+char* path_resolution(char* path)
+{
+	char* resol;
+	char sol[512]={0}; //resolution
+	char* env;
+	char* token;
+	char* sysenv=getenv("PATH");
+	if(path==NULL) return NULL;
+	env=sysenv;
+	token=strtok(env,":");
+	while(token!=NULL)
+	{
+		strcat(sol,token);
+		strcat(sol,"/");
+		strcat(sol,path);
+		strcpy(resolve,sol);
+		token=strtok(NULL,":");
+	}
+	return resol;
+}
+
 /*
  * Description: Currently this function only handles single built_in commands. You should modify this structure to launch process and offer pipeline functionality.
  */
 int evaluate_command(int n_commands, struct single_command (*commands)[512])
 {
+	pthread_t thread_c;
+	pthread_t thread_s;
+	int p_status1;
+	int p_status2;
 	int status;
-	int pid=0; //process ID
-	struct single_command* com;
-  if(n_commands == 1) {
-    com = (*commands+ki);
+	char* resolution
+	int backstatus=0;
+	int pid1=0; //process ID
+	int pid2=0;
+	int fdo,fd,fdi;
+	struct single_command* com =(*commands);
+	if(!(resolution=path_resolution(com->argv[0])))
+	{
+		strcpy(com->argv[0],resolution);
+	}
+	if(n_commands > 0) {
 		char** back_argv=make_back_argv(com->argc,com->argv);
     assert(com->argc != 0);
 
@@ -200,42 +233,86 @@ int evaluate_command(int n_commands, struct single_command (*commands)[512])
     } else if (strcmp(com->argv[0], "exit") == 0) {
       return 1;
     } else {
-			pid=fork();
-			if(pid==0)
+			pid1=fork();
+			if(n_commands>1)
 			{
-				if(strcmp(com->argv[com->argc-1],"&")==0) execv(com->argv[0],back_argv);
-				else execv(com->argv[0],com->argv);			
-      	fprintf(stderr, "%s: command not found\n", com->argv[0]);
-      	return -1;
-			}
-			else if(pid>0)
-			{
-				if(strcmp(com->argv[com->argc-1],"&")==0) printf("%d\n",pid);
-				else
+				char* resolution2;
+				struct single_command* com2=*(commands+1);
+				if(!(resolution2=path_resolution(com2->argv[0])))
 				{
-					wait(&status);
-					printf("Process Creation Success!\n");
+					strcpy(com2->argv[0],resolution2);
 				}
+				if(pid1>0)
+				{
+					pid2=fork();
+					if(pid2==0)
+					{
+						fdo=open(stdout,O_RDONLY);
+						fd=dup2(fdo,1);
+						if(execv(com->argv[0],com->argv)==-1)
+						{
+							fprintf(stderr, "%s: command not found\n", com->argv[0]);
+							return -1;
+						}
+						//thread!create and join
+					}
+					wait(&p_status1);
+					wait(&p_status2);
+				}
+				else if(pid1==0)
+				{
+					//thread! create and join
+					fdi=dup2(fd,0);
+					read(fdi,stdin,512);
+					if(execv(com2->argv[0],com2->argv)==-1)
+					{
+					  fprintf(stderr, "%s: command not found\n", com->argv[0]);
+						return -1;
+					}
+				}
+				else printf("fork error\n");
+				close(fd);
+				close(fdo);
+				close(fdi);
 			}
-    }
-		
+			else
+			{
+				if(pid1==0)
+				{
+					if(strcmp(com->argv[com->argc-1],"&")==0)
+					{
+						if(execv(com->argv[0],back_argv)==-1)
+						{
+							fprintf(stderr, "%s: command not found\n", com->argv[0]);
+							return -1;
+						}
+						backstatus=1;
+					}
+					else 
+					{
+						if(execv(com->argv[0],com->argv)==-1)
+						{
+							fprintf(stderr, "%s: command not found\n", com->argv[0]);
+							return -1;
+						}
+					}
+				}
+				else if(pid1>0)
+				{
+					if(backstatus)
+					{
+						printf("%d\n",pid);
+					}
+					else
+					{
+						wait(&status);
+						printf("Process Creation Success!\n");
+					}
+				}
+				else printf("FORK ERROR!\n");
+    	}
+		}
   }
-	else if(n_commands==2)
-	{
-		int spid=fork();
-		if(spid==0)
-		{
-			client();
-		}
-		else if(spid>0)
-		{
-			server();
-		}
-		else
-		{
-			printf("FORK ERROR\n");
-		}
-	}
   return 0;
 }
 
