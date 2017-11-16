@@ -1,6 +1,7 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -37,8 +38,13 @@ int do_fg(int argc, char** argv) {
     return -1;
 
   // TODO: Fill this.
-
-  return 0;
+	//back_pid, back_com, back_argc
+	int back_status;
+	printf("%d running\t)",back_pid);
+	for(int i=0; i<back_argc; i++) printf("%s ",back_com[i]);
+	printf("\n");
+	wait(&back_status);
+	return 0;
 }
 
 int validate_cd_argv(int argc, char** argv) {

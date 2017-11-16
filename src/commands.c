@@ -3,6 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <wait.h>
 #include "commands.h"
 #include "built_in.h"
@@ -11,12 +12,13 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #define SOCK_PATH "tpf_unix_sock.server"
 #define SERVER_PATH "tpf_unix_sock.server"
 #define CLIENT_PATH "tpf_unix_sock.client"
 #define DATA "Hello from server"
 
-void server()
+void* server(void* com2)
 {
 	int server_sock,client_sock,len,rc;
 	int bytes_rec=0;
@@ -24,6 +26,7 @@ void server()
 	struct sockaddr_un client_sockaddr;
 	char buf[256];
 	int backlog=10;
+	struct single_command* command2=(struct single_command*)com2;
 	memset(&server_sockaddr,0,sizeof(struct sockaddr_un));
 	memset(&client_sockaddr,0,sizeof(struct sockaddr_un));
 	memset(buf,0,256);
@@ -70,6 +73,12 @@ void server()
 		exit(1);
 	}
 	else printf("DATA RECEIVED = %s\n",buf);
+	dup2(client_sock,0);
+	if(execv(command2->argv[0],command2->argv)==-1)
+	{
+		fprintf(stderr, "%s: command not found\n", command2->argv[0]);
+		exit(1);
+	}
 	memset(buf,0,256);
 	strcpy(buf,DATA);
 	printf("Sending data...\n");
@@ -86,12 +95,13 @@ void server()
 	close(client_sock);
 }
 
-void client()
+void* client(void* com)
 {
 	int client_sock,rc,len;
 	struct sockaddr_un server_sockaddr;
 	struct sockaddr_un client_sockaddr;
 	char buf[256];
+	struct single_command* command=(struct single_command*)com;
 	memset(&server_sockaddr,0,sizeof(struct sockaddr_un));
 	memset(&client_sockaddr,0,sizeof(struct sockaddr_un));
 	client_sock=socket(AF_UNIX,SOCK_STREAM,0);
@@ -120,7 +130,12 @@ void client()
 		close(client_sock);
 		exit(1);
 	}
-	strcpy(buf,DATA);
+	dup2(client_sock,1);
+	if(execv(command->argv[0],command->argv)==-1)
+	{
+		fprintf(stderr, "%s: command not found\n", command->argv[0]);
+		exit(1);
+	}
 	printf("Sending data...\n");
 	rc=send(client_sock,buf,strlen(buf),0);
 	if(rc==-1)
@@ -173,25 +188,24 @@ char** make_back_argv(int argc, char** argv)
 	return back_argv;
 }
 
-char* path_resolution(char* path)
+char* path_resolution(char* com)
 {
-	char* resol;
-	char sol[512]={0}; //resolution
-	char* env;
+	char* resol=(char*)malloc(sizeof(char)*64); //resolution
 	char* token;
-	char* sysenv=getenv("PATH");
-	if(path==NULL) return NULL;
-	env=sysenv;
+	char* env=getenv("PATH");
+	struct stat condition;
+	if(com==NULL) return NULL;
 	token=strtok(env,":");
 	while(token!=NULL)
 	{
-		strcat(sol,token);
-		strcat(sol,"/");
-		strcat(sol,path);
-		strcpy(resolve,sol);
-		token=strtok(NULL,":");
+	  memset(resol,0,64);
+	  strcat(resol,token);
+	  strcat(resol,"/");
+	  strcat(resol,com);
+	  if(S_ISREG(condition.st_mode) && stat(resol,&condition)!=-1) return resol;
+	  token=strtok(NULL,":");
 	}
-	return resol;
+	return NULL;
 }
 
 /*
@@ -199,23 +213,28 @@ char* path_resolution(char* path)
  */
 int evaluate_command(int n_commands, struct single_command (*commands)[512])
 {
+	int back_pid;
 	pthread_t thread_c;
 	pthread_t thread_s;
-	int p_status1;
+	int p_status1; //multi commands
 	int p_status2;
-	int status;
-	char* resolution
-	int backstatus=0;
-	int pid1=0; //process ID
-	int pid2=0;
-	int fdo,fd,fdi;
+	int status; //single commands
+	char* resolution;
+	int isbackargv=0;
+	int t_status1;
+	int t_status2;
+	int pid1; //process ID(multi commands)
+	int pid2;
+	int sinpid; //process ID(single command)
 	struct single_command* com =(*commands);
-	if(!(resolution=path_resolution(com->argv[0])))
+	
+	if(com->argv[0][0]=='/'&&!(resolution=path_resolution(com->argv[0])))
 	{
 		strcpy(com->argv[0],resolution);
 	}
+
 	if(n_commands > 0) {
-		char** back_argv=make_back_argv(com->argc,com->argv);
+		
     assert(com->argc != 0);
 
     int built_in_pos = is_built_in_command(com->argv[0]);
@@ -233,80 +252,66 @@ int evaluate_command(int n_commands, struct single_command (*commands)[512])
     } else if (strcmp(com->argv[0], "exit") == 0) {
       return 1;
     } else {
-			pid1=fork();
 			if(n_commands>1)
 			{
-				char* resolution2;
-				struct single_command* com2=*(commands+1);
-				if(!(resolution2=path_resolution(com2->argv[0])))
+				pid1=fork();
+				char* resolution;
+				struct single_command* com2=*commands+1;
+				if(com2->argv[0][0]=='/'&&!(resolution=path_resolution(com2->argv[0])))
 				{
-					strcpy(com2->argv[0],resolution2);
+				  strcpy(com2->argv[0],resolution);
 				}
-				if(pid1>0)
-				{
-					pid2=fork();
-					if(pid2==0)
-					{
-						fdo=open(stdout,O_RDONLY);
-						fd=dup2(fdo,1);
-						if(execv(com->argv[0],com->argv)==-1)
-						{
-							fprintf(stderr, "%s: command not found\n", com->argv[0]);
-							return -1;
-						}
-						//thread!create and join
-					}
-					wait(&p_status1);
-					wait(&p_status2);
-				}
+				if(pid1>0) wait(&p_status1);
 				else if(pid1==0)
 				{
-					//thread! create and join
-					fdi=dup2(fd,0);
-					read(fdi,stdin,512);
-					if(execv(com2->argv[0],com2->argv)==-1)
-					{
-					  fprintf(stderr, "%s: command not found\n", com->argv[0]);
-						return -1;
+					pid2=fork();
+					if(pid2>0)
+					{	
+						waitpid(-1,&p_status2,WNOHANG);
+						if(pthread_create(&thread_s,NULL,server,(void*)com2)<0) printf("thread error!\n");
+						pthread_join(thread_s,(void**)&t_status1);
+						wait(&p_status2);
 					}
+					else if(pid2==0)
+					{
+						if(pthread_create(&thread_c,NULL,client,(void*)com)<0) printf("thread error!\n");
+						pthread_join(thread_c,(void**)&t_status2);
+					}
+					else printf("Fork Error!\n");
 				}
-				else printf("fork error\n");
-				close(fd);
-				close(fdo);
-				close(fdi);
+				else printf("Fork Error!\n");
 			}
-			else
+			else //n_commands==1
 			{
-				if(pid1==0)
+				sinpid=fork();
+				if(sinpid==0)
 				{
 					if(strcmp(com->argv[com->argc-1],"&")==0)
 					{
-						if(execv(com->argv[0],back_argv)==-1)
-						{
-							fprintf(stderr, "%s: command not found\n", com->argv[0]);
-							return -1;
-						}
-						backstatus=1;
+						char** back_argv=make_back_argv(com->argc,com->argv);
+						isbackargv=1;
+						back_pid=getpid();
+						com->argv=back_argv;
+						com->argc--;
+						back_com=back_argv;
+						back_argc=com->argc;
 					}
-					else 
+					if(execv(com->argv[0],com->argv)==-1)
 					{
-						if(execv(com->argv[0],com->argv)==-1)
-						{
-							fprintf(stderr, "%s: command not found\n", com->argv[0]);
-							return -1;
-						}
+						fprintf(stderr, "%s: command not found\n", com->argv[0]);
+						return -1;
+					}
+					if(isbackargv)
+					{
+						printf("%d\n",back_pid); //process id
 					}
 				}
-				else if(pid1>0)
+				else if(sinpid>0)
 				{
-					if(backstatus)
-					{
-						printf("%d\n",pid);
-					}
-					else
+					if(!isbackargv)
 					{
 						wait(&status);
-						printf("Process Creation Success!\n");
+						
 					}
 				}
 				else printf("FORK ERROR!\n");
