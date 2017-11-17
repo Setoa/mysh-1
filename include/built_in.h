@@ -3,10 +3,12 @@
 
 typedef int (*built_in_command_do)(int, char**);
 typedef int (*built_in_command_validate)(int, char**);
-
-extern int back_pid;
-extern char** back_com;
-
+struct back_info{
+	int back_pid;
+	char** back_argv;
+	int back_argc;
+};
+struct back_info back;
 struct built_in_command
 {
   char command_name[512];
@@ -14,9 +16,6 @@ struct built_in_command
   built_in_command_validate command_validate;
 };
 
-int back_pid; //background process
-char** back_com; //=back_argv
-int back_argc;
 /**
   do_cd(argc, argv)
 
@@ -60,6 +59,7 @@ int validate_cd_argv(int argc, char** argv);
     If success, return 1. (true)
     Else return 0. (false)
 */
+
 int validate_pwd_argv(int argc, char** argv);
 
 int validate_fg_argv(int argc, char** argv);

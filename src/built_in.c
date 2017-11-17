@@ -38,12 +38,12 @@ int do_fg(int argc, char** argv) {
     return -1;
 
   // TODO: Fill this.
-	//back_pid, back_com, back_argc
+	//back_pid, back_argv, back_argc
 	int back_status;
-	printf("%d running\t)",back_pid);
-	for(int i=0; i<back_argc; i++) printf("%s ",back_com[i]);
+	printf("%d running\t",back.back_pid);
+	for(int i=0; i<back.back_argc; i++) printf("%s ",back.back_argv[i]);
 	printf("\n");
-	wait(&back_status);
+	waitpid(-1,&back_status,0);
 	return 0;
 }
 
