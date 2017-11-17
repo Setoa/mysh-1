@@ -245,12 +245,9 @@ int evaluate_command(int n_commands, struct single_command (*commands)[512])
     } else {
 			if(com->argv[0][0]!='/')
 			{
-			  resolution=path_resolution(com->argv[0]);
-			  printf("resolution : %s\n",resolution);
+			  resolution=path_resolution(com->argv[0]); 
 			  strcpy(com->argv[0],resolution);
-			  printf("com->argv[0] : %s\n",com->argv[0]);
 			  com->argc--;
-			  printf("com->argc : %d\n",com->argc);
 			}
 
 			if(n_commands>1)
@@ -299,7 +296,6 @@ int evaluate_command(int n_commands, struct single_command (*commands)[512])
 							return -1;
 						}
 						back.back_pid=getpid();
-						printf("backpid : %d\n",back.back_pid);
 						back.back_argc=com->argc;
 					}
 					else
